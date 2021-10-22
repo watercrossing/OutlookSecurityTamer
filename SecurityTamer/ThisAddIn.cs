@@ -59,7 +59,7 @@ namespace SecurityTamer
             {
                 if (Item is Outlook.MailItem mailItem)
                 {
-                    cleanMailItem(mailItem);
+                    CleanMailItem(mailItem);
                 }
             }
         }
@@ -86,12 +86,19 @@ namespace SecurityTamer
             if (Inspector.CurrentItem is Outlook.MailItem mailItem)
             {
                 // This does catch mails not otherwise cleaned.
-                Debug.WriteLine("Inspecting mailitem " + mailItem.Subject);
-                cleanMailItem(mailItem);
+                CleanMailItem(mailItem);
+            } else if (Inspector.CurrentItem is Outlook.MeetingItem meetingItem)
+            {
+                // hmm, haven't encountered a MeetingItem yet
+                CleanMeetingItem(meetingItem);
+            }
+            else if (Inspector.CurrentItem is Outlook.AppointmentItem appItem)
+            {
+                CleanAppointmentItem(appItem);
             }
             else
             {
-                Debug.WriteLine("Inspector.CurrentItem is not a mailItem");
+                Debug.WriteLine("Inspector.CurrentItem is not a mail/meeting/appointmentItem");
             }
         }
 
@@ -108,7 +115,7 @@ namespace SecurityTamer
                 {
                     if (selected is Outlook.MailItem mailItem)
                     {
-                        cleanMailItem(mailItem);
+                        CleanMailItem(mailItem);
                     }
 
                 }
@@ -116,11 +123,32 @@ namespace SecurityTamer
 
         }
 
-        public static void cleanMailItem(Outlook.MailItem mailItem)
+        public static void CleanAppointmentItem(Outlook.AppointmentItem appItem)
+        {
+            Debug.WriteLine("Can't Cleaning AppointmentItem id: {0}, subject: {1}", appItem.EntryID, appItem.Subject);
+            // appointments only use plaintext or RTF, not html (?!). The following doesn't work either, although it was mentioned online
+            //var htmlBody = appItem.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x10130102");
+
+        }
+
+        public static void CleanMeetingItem(Outlook.MeetingItem meetingItem)
+        {
+            Debug.WriteLine("Can't currently cleaning meeting id: {0}, subject: {1}", meetingItem.EntryID, meetingItem.Subject);
+        }
+
+        public static void CleanMailItem(Outlook.MailItem mailItem)
         {
             Outlook.OlBodyFormat bodyType = mailItem.BodyFormat;
-            Debug.WriteLine("Cleaning id: {0}, subject: {1}, type: {2}", mailItem.EntryID, mailItem.Subject, Enum.GetName(typeof(Outlook.OlBodyFormat), bodyType));
-
+            Debug.WriteLine("Cleaning mail id: {0}, subject: {1}, type: {2}", mailItem.EntryID, mailItem.Subject, Enum.GetName(typeof(Outlook.OlBodyFormat), bodyType));
+            if (mailItem.Subject != null)
+            {
+                if (mailItem.Subject.Contains("proposal draft for review"))
+                {
+                    // Useful for breakpoints
+                    Debug.WriteLine("Found keyword");
+                }
+            }
+                
             string body, newbody;
             MatchEvaluator evaluator;
             bool bodyChanged = false;
@@ -146,6 +174,8 @@ namespace SecurityTamer
                     break;
                 case Outlook.OlBodyFormat.olFormatHTML:
                     body = mailItem.HTMLBody;
+                    // In replies the div gets rewritten, so if we want to rewrite those too we need to make this a regex.
+                    // Example <div class=\"\" style=\"font-family:Helvetica; font-size:14px; font-style:normal; font-variant-caps:normal; font-weight:normal; letter-spacing:normal; text-align:start; text-indent:0px; text-transform:none; white-space:normal; word-spacing:0px; text-decoration:none; background-color:rgb(255,239,213); padding:1px\">\r\n<p class=\"\" style=\"font-size:11pt; line-height:10pt; font-family:Arial,Helvetica,sans-serif\">\r\n⚠ Caution: External sender</p>\r\n</div>\r\n
                     newbody = body.Replace("<div style=\"background-color:#FFEFD5; padding:1px; \">\r\n<p style=\"font-size:11pt; line-height:10pt; font-family: 'Arial','Helvetica',sans-serif;\">\r\n⚠ This sender is external to UCL, please take care when accessing any links or opening attachments.</p>\r\n</div>\r\n<br>\r\n", "");
                     newbody = body.Replace("<div style=\"background-color:#FFEFD5; padding:1px; \">\r\n<p style=\"font-size:11pt; line-height:10pt; font-family: 'Arial','Helvetica',sans-serif;\">\r\n⚠ Caution: External sender</p>\r\n</div>\r\n<br>\r\n", "");
 

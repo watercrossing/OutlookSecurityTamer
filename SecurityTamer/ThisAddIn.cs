@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Net;
 using Outlook = Microsoft.Office.Interop.Outlook;
+using Word = Microsoft.Office.Interop.Word;
 using System.Diagnostics;
 using System.Text.RegularExpressions;
+using System.Runtime.InteropServices;
 
 namespace SecurityTamer
 {
@@ -55,13 +57,7 @@ namespace SecurityTamer
         void Item_Add(object Item)
         {
             Debug.WriteLine("Item added");
-            if (Item != null)
-            {
-                if (Item is Outlook.MailItem mailItem)
-                {
-                    CleanMailItem(mailItem);
-                }
-            }
+            cleanTypeSelect(Item);
         }
 
         private void ThisAddIn_Shutdown(object sender, System.EventArgs e)
@@ -83,23 +79,39 @@ namespace SecurityTamer
 
         void Inspector_NewInspector(Outlook.Inspector Inspector)
         {
-            if (Inspector.CurrentItem is Outlook.MailItem mailItem)
+            Debug.WriteLine("New Inspector");
+            cleanTypeSelect(Inspector.CurrentItem);
+        }
+
+        void cleanTypeSelect(object Item)
+        {
+            try
             {
-                // This does catch mails not otherwise cleaned.
-                CleanMailItem(mailItem);
-            } else if (Inspector.CurrentItem is Outlook.MeetingItem meetingItem)
-            {
-                // hmm, haven't encountered a MeetingItem yet
-                CleanMeetingItem(meetingItem);
+                if (Item != null)
+                {
+                    if (Item is Outlook.MailItem mailItem)
+                    {
+                        CleanMailItem(mailItem);
+                    }
+                    else if (Item is Outlook.MeetingItem meetingItem)
+                    {
+                        CleanMeetingItem(meetingItem);
+                    }
+                    else if (Item is Outlook.AppointmentItem appItem)
+                    {
+                        CleanAppointmentItem(appItem);
+                    }
+                    else
+                    {
+                        Debug.WriteLine("Item is not a mail/meeting/appointmentItem");
+                    }
+                }
             }
-            else if (Inspector.CurrentItem is Outlook.AppointmentItem appItem)
+            catch (Exception)
             {
-                CleanAppointmentItem(appItem);
+                Debug.WriteLine("Uncaught exception in Cleaning items");
             }
-            else
-            {
-                Debug.WriteLine("Inspector.CurrentItem is not a mail/meeting/appointmentItem");
-            }
+            
         }
 
         void ExplorerSelectionChange()
@@ -113,10 +125,7 @@ namespace SecurityTamer
             {
                 foreach (var selected in selection)
                 {
-                    if (selected is Outlook.MailItem mailItem)
-                    {
-                        CleanMailItem(mailItem);
-                    }
+                    cleanTypeSelect(selected);
 
                 }
             }
@@ -128,12 +137,73 @@ namespace SecurityTamer
             Debug.WriteLine("Can't Cleaning AppointmentItem id: {0}, subject: {1}", appItem.EntryID, appItem.Subject);
             // appointments only use plaintext or RTF, not html (?!). The following doesn't work either, although it was mentioned online
             //var htmlBody = appItem.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x10130102");
+            try
+            {
+                Outlook.Inspector inspector = appItem.GetInspector;
+                if (inspector != null)
+                {
+                    CleanRTF(inspector);
+                }
+            }
+            catch (Exception)
+            {
+
+                Debug.WriteLine("GetInspector threw an error");
+            }
 
         }
 
         public static void CleanMeetingItem(Outlook.MeetingItem meetingItem)
         {
-            Debug.WriteLine("Can't currently cleaning meeting id: {0}, subject: {1}", meetingItem.EntryID, meetingItem.Subject);
+            // meeting requests. Also just RTFs body. Normal body is set though, could convert to text only?
+            //Outlook.OlBodyFormat bodyType = meetingItem.BodyFormat;
+            Debug.WriteLine("Can't currently cleaning meeting id: {0}, subject: {1}", meetingItem.EntryID, meetingItem.Subject);//, Enum.GetName(typeof(Outlook.OlBodyFormat), bodyType);
+            // This doesn't work for accessing HTML
+            //var htmlBody = meetingItem.PropertyAccessor.GetProperty("http://schemas.microsoft.com/mapi/proptag/0x10130102");
+            try
+            {
+                // This always fails when reached from a "New Inspector" event
+                CleanRTF(meetingItem.GetInspector);
+            }
+            catch (COMException)
+            {
+                Debug.WriteLine("Error in calling CleanRTF from CleanMeetingItem");
+            }
+        }
+
+        public static void CleanRTF(Outlook.Inspector inspector)
+        {
+            if (inspector.IsWordMail())
+            {
+                Word.Document document = inspector.WordEditor;
+                document.Activate();
+                Word.Range range = document.Range(document.Content.Start, document.Content.End);
+                // range.Text works just fine. 
+                //Debug.WriteLine(range.Text);
+                Word.Find findObject = range.Find;
+                findObject.ClearFormatting();
+                findObject.Text = "safelinks";
+                findObject.Replacement.ClearFormatting();
+                findObject.Replacement.Text = "sadlinks";
+                object missing = System.Reflection.Missing.Value;
+                object replaceAll = Word.WdReplace.wdReplaceAll;
+
+                try
+                {
+                    // This should work, but I am getting a "Command is not available" exception. Hmm
+                    // https://docs.microsoft.com/en-us/visualstudio/vsto/how-to-programmatically-search-for-and-replace-text-in-documents?view=vs-2019
+                    // findObject.Execute(ref missing, ref missing, ref missing, ref missing, ref missing, ref missing, ref missing, ref missing, ref missing, ref missing, ref replaceAll, ref missing, ref missing, ref missing, ref missing);
+                    // document.Save();
+                }
+                catch (Exception)
+                {
+                    Debug.WriteLine("Error when executing search&replace");
+                }
+            }
+            else
+            {
+                Debug.WriteLine("It is not a word mail!");
+            }
         }
 
         public static void CleanMailItem(Outlook.MailItem mailItem)
